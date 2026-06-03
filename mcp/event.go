@@ -52,7 +52,16 @@ func writeEvent(w http.ResponseWriter, evt Event) (int, error) {
 	if evt.Retry != "" {
 		fmt.Fprintf(&b, "retry: %s\n", evt.Retry)
 	}
-	fmt.Fprintf(&b, "data: %s\n\n", string(evt.Data))
+	// Write the data payload directly rather than via fmt.Fprintf with
+	// string(evt.Data): the string conversion copies the whole payload an extra
+	// time and fmt then copies it again into the buffer. For large MCP responses
+	// under a burst of concurrent writes that doubles peak heap. Pre-grow the
+	// buffer so the payload lands in a single allocation instead of repeated
+	// bytes.growSlice doublings.
+	b.Grow(len("data: \n\n") + len(evt.Data))
+	b.WriteString("data: ")
+	b.Write(evt.Data)
+	b.WriteString("\n\n")
 	n, err := w.Write(b.Bytes())
 	rc := http.NewResponseController(w)
 	// Ignore returned error as flushing is best-effort.
